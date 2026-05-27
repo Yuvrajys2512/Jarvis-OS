@@ -7,8 +7,7 @@ faster-whisper>=1.0.0             # Offline speech transcription (faster than or
 # Text-to-Speech
 edge-tts>=6.1.0                   # Microsoft neural voices, runs locally
 
-# Wake Word Detection
-openwakeword>=0.6.0               # "Hey Jarvis" detection
+# Wake Word Detection — handled by faster-whisper (tiny model), no extra library needed
 
 # Audio Recording & Playback
 sounddevice>=0.4.6                # Cross-platform mic recording
