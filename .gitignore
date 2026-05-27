@@ -1,6 +1,9 @@
 # Environment & secrets — NEVER commit these
 .env
 
+# Claude Code session data
+.claude/
+
 # Python cache
 __pycache__/
 *.py[cod]
