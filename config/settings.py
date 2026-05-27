@@ -34,5 +34,5 @@ GEMINI_MODEL = "gemini-2.0-flash"
 # --- Audio ---
 AUDIO_SAMPLE_RATE = 16000   # Hz, Whisper expects 16kHz
 AUDIO_CHANNELS = 1          # mono
-SILENCE_THRESHOLD = 0.01    # amplitude below this = silence
-SILENCE_DURATION = 1.5      # seconds of silence before stopping recording
+SILENCE_THRESHOLD = 0.005   # amplitude below this = silence (lower = more sensitive)
+SILENCE_DURATION = 2.0      # seconds of silence before stopping recording

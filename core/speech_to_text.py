@@ -66,7 +66,7 @@ def record_until_silence() -> np.ndarray:
 def transcribe(audio: np.ndarray) -> str:
     """Convert a float32 audio array to text using Whisper."""
     model = _get_model()
-    segments, _ = model.transcribe(audio, language=WHISPER_LANGUAGE, beam_size=5)
+    segments, _ = model.transcribe(audio, language=WHISPER_LANGUAGE, beam_size=5, no_speech_threshold=0.6)
     return " ".join(segment.text.strip() for segment in segments)
 
 
