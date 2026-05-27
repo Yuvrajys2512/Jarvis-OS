@@ -1,5 +1,5 @@
 # AI Brain
-google-generativeai>=0.8.0       # Gemini Flash API
+groq>=0.9.0                      # Groq API — free tier, fast inference, tool use support
 
 # Speech-to-Text
 faster-whisper>=1.0.0             # Offline speech transcription (faster than original Whisper)

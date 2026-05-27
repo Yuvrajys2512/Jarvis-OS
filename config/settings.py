@@ -4,7 +4,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- API Keys ---
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")  # kept in case needed later
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
 # --- Speech-to-Text ---
 # Model size tradeoff: tiny=fastest/least accurate, large-v3=slowest/most accurate
@@ -29,7 +30,7 @@ WAKE_WORD_THRESHOLD = 0.5        # 0.0–1.0, higher = less false triggers
 WEBCAM_INDEX = 0  # 0 is usually the built-in/default webcam
 
 # --- Gemini ---
-GEMINI_MODEL = "gemini-2.0-flash"
+GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"  # Llama 4, reliable tool use
 
 # --- Audio ---
 AUDIO_SAMPLE_RATE = 16000   # Hz, Whisper expects 16kHz
