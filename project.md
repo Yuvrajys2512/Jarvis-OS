@@ -268,3 +268,4 @@ That's the only external API. Everything else is local.
 **Phase 6 — Complete**
 **Phase 7 — Skipped (webcam/vision deferred)**
 **Phase 8 — Complete**
+**Phase 9 — Complete**
