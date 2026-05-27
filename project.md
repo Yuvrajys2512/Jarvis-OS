@@ -260,4 +260,5 @@ That's the only external API. Everything else is local.
 
 ## Current Status
 
-**Phase 1 — In Progress**
+**Phase 1 — Complete**
+**Phase 2 — Complete**
