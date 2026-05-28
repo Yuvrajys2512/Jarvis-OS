@@ -104,6 +104,122 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Get the current weather for a city or location. Leave location empty to auto-detect based on IP.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string", "description": "City or location name, e.g. 'Delhi', 'London'. Leave empty for current location."}
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_timer",
+            "description": "Set a countdown timer in seconds. JARVIS will speak an alert when it fires.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "seconds": {"type": "integer", "description": "Duration in seconds, e.g. 300 for 5 minutes"},
+                    "label": {"type": "string", "description": "Name for this timer, e.g. 'Tea timer', 'Meeting reminder'"}
+                },
+                "required": ["seconds"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cancel_timer",
+            "description": "Cancel an active timer by its label.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "label": {"type": "string", "description": "The timer label to cancel"}
+                },
+                "required": ["label"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_timers",
+            "description": "List all currently active timers.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_files",
+            "description": "Search for files on the computer by name or pattern. Searches Desktop, Documents, Downloads, and home folder.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "File name or pattern to search for, e.g. 'resume', '*.pdf'"},
+                    "folder": {"type": "string", "description": "Optional specific folder path to search in"}
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_clipboard",
+            "description": "Read the current text content of the clipboard.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_clipboard",
+            "description": "Copy text to the clipboard.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "The text to copy to the clipboard"}
+                },
+                "required": ["text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "take_screenshot",
+            "description": "Take a screenshot of the entire screen and save it to the Desktop.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {"type": "string", "description": "Optional full path to save the screenshot"}
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "describe_screen",
+            "description": "Take a screenshot and use vision AI to answer a question about what's on the screen. Useful for reading on-screen text, identifying open apps, or understanding the current screen state.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "What to ask about the screen, e.g. 'What app is open?', 'Read the error message on screen'"}
+                },
+                "required": [],
+            },
+        },
+    },
 ]
 
 # ── Tool execution map ─────────────────────────────────────────────────────────
@@ -127,6 +243,33 @@ def _execute_tool(name: str, args: dict) -> str:
     elif name == "get_page_text":
         from tools.browser import get_page_text
         return get_page_text(**args)
+    elif name == "get_weather":
+        from tools.extras import get_weather
+        return get_weather(**args)
+    elif name == "set_timer":
+        from tools.extras import set_timer
+        return set_timer(**args)
+    elif name == "cancel_timer":
+        from tools.extras import cancel_timer
+        return cancel_timer(**args)
+    elif name == "list_timers":
+        from tools.extras import list_timers
+        return list_timers()
+    elif name == "search_files":
+        from tools.extras import search_files
+        return search_files(**args)
+    elif name == "read_clipboard":
+        from tools.extras import read_clipboard
+        return read_clipboard()
+    elif name == "write_clipboard":
+        from tools.extras import write_clipboard
+        return write_clipboard(**args)
+    elif name == "take_screenshot":
+        from tools.extras import take_screenshot
+        return take_screenshot(**args)
+    elif name == "describe_screen":
+        from tools.extras import describe_screen
+        return describe_screen(**args)
     return f"Unknown tool: {name}"
 
 

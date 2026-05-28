@@ -24,5 +24,9 @@ playwright>=1.40.0                # Control Chromium browser
 # System Control
 pyautogui>=0.9.54                 # Mouse, keyboard, window management
 
+# Dashboard
+fastapi>=0.110.0                  # Web server for the dashboard
+uvicorn>=0.29.0                   # ASGI server
+
 # Utilities
 python-dotenv>=1.0.0              # Load .env file into os.environ
