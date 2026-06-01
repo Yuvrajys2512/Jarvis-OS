@@ -5,7 +5,6 @@ receives real-time events from the JARVIS pipeline.
 """
 import asyncio
 import threading
-import webbrowser
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
@@ -79,10 +78,8 @@ def _run_server() -> None:
 
 
 def launch() -> None:
-    """Start the server in a background daemon thread and open the dashboard."""
+    """Start the server in a background daemon thread."""
     thread = threading.Thread(target=_run_server, daemon=True)
     thread.start()
-    # Give uvicorn a moment to bind the port before opening the browser
     import time
     time.sleep(1.5)
-    webbrowser.open("http://localhost:7777")

@@ -6,21 +6,24 @@ from pathlib import Path
 # Maps friendly names → what to actually launch on Windows
 APP_ALIASES = {
     "notepad": "notepad.exe",
+    "antigravity": "antigravity",
+    "antigravity ide": "antigravity",
     "vs code": "code",
     "vscode": "code",
     "visual studio code": "code",
-    "chrome": "chrome",
-    "google chrome": "chrome",
-    "edge": "msedge",
-    "microsoft edge": "msedge",
+    # "start <name>" lets Windows find apps via registry even if they're not in PATH
+    "chrome": "start chrome",
+    "google chrome": "start chrome",
+    "edge": "start msedge",
+    "microsoft edge": "start msedge",
     "explorer": "explorer.exe",
     "file explorer": "explorer.exe",
     "calculator": "calc.exe",
-    "terminal": "wt.exe",
-    "windows terminal": "wt.exe",
+    "terminal": "start wt",
+    "windows terminal": "start wt",
     "cmd": "cmd.exe",
-    "spotify": "spotify",
-    "discord": "discord",
+    "spotify": "start spotify",
+    "discord": "start discord",
 }
 
 

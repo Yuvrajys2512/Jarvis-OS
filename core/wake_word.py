@@ -3,7 +3,13 @@ import sounddevice as sd
 from faster_whisper import WhisperModel
 from config.settings import AUDIO_SAMPLE_RATE
 
-CHUNK_DURATION = 2.0  # seconds per listening chunk
+CHUNK_DURATION = 2.0  # seconds per chunk — longer gives Whisper more context
+
+# Whisper commonly mishears "Jarvis" — cover all phonetic variants
+_TRIGGERS = {
+    "jarvis", "jarvi", "jarvi's", "jarves", "jarvice", "jarvi s", "jarv",
+    "jarvs", "jarvas", "jarbis", "jarvis,", "jarbus", "jarvos", "harvey",
+}
 
 _tiny_model: WhisperModel | None = None
 
@@ -36,16 +42,29 @@ def wait_for_wake_word() -> None:
 
     print("Waiting for 'Jarvis'...")
 
+    _silent_count = 0
     while True:
         audio = sd.rec(chunk_samples, samplerate=AUDIO_SAMPLE_RATE, channels=1, dtype="float32")
         sd.wait()
         audio = audio.flatten()
 
-        # beam_size=1 = greedy decoding, fastest possible transcription
-        segments, _ = model.transcribe(audio, language="en", beam_size=1)
-        text = " ".join(s.text for s in segments).lower()
+        rms = float(np.sqrt(np.mean(audio ** 2)))
+        print(f"  [wake] RMS={rms:.4f}", end="\r")   # live level meter in terminal
+        if rms < 0.0001:   # near-digital-silence — skip; Whisper handles real quiet speech
+            _silent_count += 1
+            if _silent_count % 5 == 0:
+                print(f"  [wake] no signal (RMS={rms:.4f}) — check mic")
+            continue
+        _silent_count = 0
 
-        if "jarvis" in text:
+        # no_speech_threshold=0.1 — don't let Whisper silently discard quiet-but-real speech
+        segments, _ = model.transcribe(audio, language="en", beam_size=1, no_speech_threshold=0.1)
+        text = " ".join(s.text for s in segments).lower().strip()
+
+        if text:
+            print(f"  [wake] heard: {text!r}")   # shows in terminal so you can see what it's picking up
+
+        if any(trigger in text for trigger in _TRIGGERS):
             _play_activation_tone()
             return
 

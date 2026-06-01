@@ -1,6 +1,6 @@
-import json
 from groq import Groq
 from config.settings import GROQ_API_KEY, GROQ_MODEL
+from core.agent_base import Agent
 
 SYSTEM_PROMPT = """You are JARVIS (Just A Rather Very Intelligent System), a personal AI assistant running on the user's computer.
 
@@ -15,7 +15,13 @@ Behaviour:
 - When given a multi-step instruction, execute every step in order using your tools
 - Always use tools to fulfil requests rather than just describing what you would do
 - If a tool fails, acknowledge it calmly and continue with the rest of the task
-- Never refuse a reasonable personal assistant request"""
+- Never refuse a reasonable personal assistant request
+
+Your Researcher (web access):
+- For ANYTHING that needs the web — a search, a current fact, a price, reading a page — delegate to your Researcher by calling `ask_researcher` with the task in plain language. The Researcher drives a REAL, VISIBLE Chrome window the user is watching: it opens the browser, types the query on screen, reads the results, and returns the findings to you.
+- You do NOT browse directly and you do NOT open Chrome yourself to search — `ask_researcher` runs the whole on-screen browsing flow. (Only use `open_application` for "chrome" if the user explicitly wants a blank browser.)
+- When the Researcher returns, READ its findings and answer with the actual information — quote the real figure (e.g. the current gold price), not a vague "I looked it up". If the findings don't contain the answer, say so plainly.
+- Keep spoken answers short and conversational — the user already watched the action happen on screen."""
 
 # ── Tool definitions (what the model sees) ────────────────────────────────────
 
@@ -51,56 +57,14 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
-            "name": "search_google",
-            "description": "Open Google in the browser and search for a query.",
+            "name": "ask_researcher",
+            "description": "Delegate any web research, search, price lookup, or page-reading task to the Researcher — a specialist sub-agent that drives the VISIBLE Chrome window the user is watching. It searches, opens pages, reads results, does multi-step research as needed, and returns the findings. Use this for ANY question needing current information from the web (prices, facts, news, lookups). Pass the full task in natural language; after it returns, answer the user using its findings.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "The search query"}
+                    "task": {"type": "string", "description": "The full research task in natural language, e.g. 'find the current price of gold per gram in INR' or 'what are the reviews of the new iPhone'"}
                 },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "open_url",
-            "description": "Open a specific URL in the browser.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "url": {"type": "string", "description": "The URL to open"}
-                },
-                "required": ["url"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "find_prices",
-            "description": "Search online for the price of a product. Returns a list of products with prices.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "The product to search for"}
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_page_text",
-            "description": "Fetch and read the visible text content of a webpage.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "url": {"type": "string", "description": "The URL to read"}
-                },
-                "required": ["url"],
+                "required": ["task"],
             },
         },
     },
@@ -224,25 +188,16 @@ TOOL_DEFINITIONS = [
 
 # ── Tool execution map ─────────────────────────────────────────────────────────
 
-def _execute_tool(name: str, args: dict) -> str:
+def _execute_tool(name: str, args: dict, on_tool_start=None, on_tool_end=None) -> str:
     if name == "open_application":
         from tools.system import open_application
         return open_application(**args)
     elif name == "run_terminal_command":
         from tools.system import run_terminal_command
         return run_terminal_command(**args)
-    elif name == "search_google":
-        from tools.browser import search_google
-        return search_google(**args)
-    elif name == "open_url":
-        from tools.browser import open_url
-        return open_url(**args)
-    elif name == "find_prices":
-        from tools.browser import find_prices
-        return find_prices(**args)
-    elif name == "get_page_text":
-        from tools.browser import get_page_text
-        return get_page_text(**args)
+    elif name == "ask_researcher":
+        from core.agents.researcher import ask_researcher
+        return ask_researcher(args["task"], on_tool_start, on_tool_end)
     elif name == "get_weather":
         from tools.extras import get_weather
         return get_weather(**args)
@@ -273,10 +228,9 @@ def _execute_tool(name: str, args: dict) -> str:
     return f"Unknown tool: {name}"
 
 
-# ── Agent setup ────────────────────────────────────────────────────────────────
+# ── Client ─────────────────────────────────────────────────────────────────────
 
 _client: Groq | None = None
-_conversation: list = []
 
 
 def _get_client() -> Groq:
@@ -286,53 +240,41 @@ def _get_client() -> Groq:
     return _client
 
 
-def process_instruction(user_text: str) -> str:
-    """
-    Send a natural language instruction to Llama 3.3 on Groq.
-    Runs the tool-calling loop manually:
-      1. Send messages → model replies with tool call(s) or plain text
-      2. If tool calls: execute each, append results, repeat
-      3. If plain text: return it
-    Conversation history is preserved across calls so JARVIS has memory.
-    """
-    client = _get_client()
+# ── Orchestrator ───────────────────────────────────────────────────────────────
+# JARVIS is a single Agent instance holding every tool, dispatched through
+# _execute_tool. This is behaviourally identical to the original single-loop
+# agent. Stage 2+ splits the tools into specialist sub-agents and gives the
+# orchestrator `ask_<specialist>` delegators (agents-as-tools).
 
-    # Build message history — system prompt + full conversation + new user message
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    messages.extend(_conversation)
-    messages.append({"role": "user", "content": user_text})
+_orchestrator: Agent | None = None
 
-    while True:
-        response = client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=messages,
+
+def _get_orchestrator() -> Agent:
+    global _orchestrator
+    if _orchestrator is None:
+        _orchestrator = Agent(
+            name="jarvis",
+            system_prompt=SYSTEM_PROMPT,
             tools=TOOL_DEFINITIONS,
-            tool_choice="auto",
+            dispatch=_execute_tool,
+            client_getter=_get_client,
         )
+    return _orchestrator
 
-        message = response.choices[0].message
-        messages.append(message)
 
-        if not message.tool_calls:
-            # No tool calls — we have the final response
-            final_text = message.content or ""
-            # Save this exchange to conversation history
-            _conversation.append({"role": "user", "content": user_text})
-            _conversation.append({"role": "assistant", "content": final_text})
-            return final_text
+def process_instruction(user_text: str, on_tool_start=None, on_tool_end=None) -> str:
+    """
+    Send a natural-language instruction to JARVIS and return the spoken reply.
 
-        # Execute each tool call and collect results
-        for tc in message.tool_calls:
-            args = json.loads(tc.function.arguments)
-            print(f"  [tool] {tc.function.name}({args})")
-            try:
-                result = _execute_tool(tc.function.name, args)
-            except Exception as e:
-                result = f"Tool error: {e}"
-            print(f"  [result] {str(result)[:120]}")
+    Delegates to the orchestrator Agent, which runs the manual tool-calling loop
+    (send → model replies with tool call(s) or plain text → execute tools → repeat
+    → return final text). The orchestrator keeps conversation history across calls,
+    so JARVIS has memory for the session.
 
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "content": str(result),
-            })
+    on_tool_start(agent, name, args) and on_tool_end(agent, name, args, result) are
+    optional hooks the caller (main.py) uses to narrate each tool, emit dashboard
+    events, and toggle window stacking around tool execution.
+    """
+    return _get_orchestrator().run(
+        user_text, on_tool_start=on_tool_start, on_tool_end=on_tool_end
+    )

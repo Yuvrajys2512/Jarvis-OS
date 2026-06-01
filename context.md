@@ -28,16 +28,20 @@ Preloads all models, starts FastAPI dashboard, opens browser, enters wake-word l
 
 ## Current Status
 
-**Phase 10 in progress — UI overhaul complete, needs real-world WS testing.**
+**Phase 11 — backdrop display model + visible Playwright browser.**
 
 | What | Status |
 |---|---|
 | Full voice pipeline (wake → STT → LLM → TTS) | Done |
 | Dashboard with dramatic state-based UI | Done — keyboard-tested, WS untested live |
-| 15 tools across system, browser, extras | Done |
-| Window tile system (Chrome doesn't overlap JARVIS) | Done — untested |
+| 16 tools across system, browser, extras | Done |
+| **Backdrop model** — JARVIS runs behind, apps open in the foreground over it | Done |
+| **Visible browser** — dedicated JARVIS Chrome profile, on-screen typing, reads results | Done — search tested live |
 | ElevenLabs voice upgrade | Not started |
 | Antigravity IDE recent projects | Not started — `get_recent_vs_code_project()` only works for VS Code |
+
+### Display model — TOPMOST toggle (Phase 11)
+The HUD is created with `on_top=True` (HWND_TOPMOST) — always visible above everything. When a foreground tool runs (`open_application`, `search_google`, `open_url`, `find_prices`, `get_page_text`), `_set_topmost(False)` drops JARVIS to NOTOPMOST so Chrome/apps appear in front. `_set_topmost(True)` restores JARVIS on top once the tool finishes. The old `_keep_in_background` thread (HWND_BOTTOM every 2.5s) and the left-62%/right-38% tile system are retired for the live assistant (kept only for `demo.py`).
 
 ---
 
@@ -58,7 +62,10 @@ JARVIS/
 │   ├── wake_word.py      # Whisper base, 2s chunks, triggers on "jarvis"
 │   ├── speech_to_text.py # Silence-gated mic recording + Whisper transcription
 │   ├── text_to_speech.py # edge-tts → PyAV decode → sounddevice playback
-│   └── agent.py          # Groq/Llama4 brain with manual tool-calling loop + history
+│   ├── agent_base.py     # reusable Agent class — the tool-calling loop + per-agent history
+│   ├── agent.py          # ORCHESTRATOR: JARVIS persona + non-browser tools + ask_researcher
+│   └── agents/
+│       └── researcher.py # Researcher specialist — owns the browser tools (web research)
 │
 ├── tools/
 │   ├── system.py         # open_application, run_terminal_command, get_recent_vs_code_project
@@ -76,15 +83,17 @@ JARVIS/
 ```
 1. wait_for_wake_word()   → Whisper base 2s chunks, triggers on "jarvis"
 2. listen_and_transcribe() → silence-gated recording, Whisper beam_size=5
-3. _patch_agent_for_dashboard() → monkey-patches _execute_tool (once, guarded)
-4. process_instruction(command) → Groq tool-calling loop until plain text
-5. speak(response)        → edge-tts → PyAV → sounddevice
+3. process_instruction(command, _on_tool_start, _on_tool_end)
+     → orchestrator Agent runs the Groq tool-calling loop until plain text;
+       the hooks narrate each tool, emit dashboard events, and toggle window stacking
+4. speak(response)        → edge-tts → PyAV → sounddevice
 
 Dashboard events at each step:
   server.emit("status", value="idle|listening|thinking|speaking")
   server.emit("user",   text=command)
   server.emit("jarvis", text=response)
-  server.emit("tool",   name=name, args=args)
+  server.emit("tool",   name=name, args=args, agent=agent)   # agent = which agent ran it
+  server.emit("agent",  name=specialist, state="active|idle")  # multi-agent dispatch → HUD agent rail
 ```
 
 ---
@@ -142,7 +151,7 @@ z-index 10: #hud (corners, labels, transcript, top bar)
 
 ---
 
-## Tools — All 15
+## Tools — All 16
 
 ### System (`tools/system.py`)
 | Tool | Description |
@@ -151,17 +160,22 @@ z-index 10: #hud (corners, labels, transcript, top bar)
 | `run_terminal_command` | Shell command, 30s timeout, blocklist for destructive commands |
 | `get_recent_vs_code_project` | Reads VS Code storage.json — **doesn't work for Antigravity IDE** |
 
-### Browser (`tools/browser.py`) — has window tile system
+### Browser (`tools/browser.py`) — visible Playwright Chrome (dedicated profile)
 | Tool | Description |
 |---|---|
-| `search_google` | Opens new Chrome window (tiled), theatrically types query, presses Enter |
-| `open_url` | Opens new Chrome window (tiled), types URL |
-| `get_page_text` | Headless Playwright, returns first 3000 chars of body text |
-| `find_prices` | Headed Playwright (off-screen tiny window), Bing Shopping, `.br-item` selectors |
+| `search_google` | Visible Chrome → Google → types query letter-by-letter → Enter → **returns results text** so JARVIS answers with real numbers |
+| `find_prices` | Same visible flow, query suffixed with "price" |
+| `open_url` | Navigates the visible window to a URL |
+| `get_page_text` | Navigates the visible window to a URL, returns first 3000 chars of body text |
+| `close_browser` | Closes the JARVIS Chrome window |
 
-**Window tile system:** `JARVIS_FRACTION = 0.38` reserves right 38% for dashboard. Each new Chrome window increments `_chrome_count`. `_arrange()` uses PowerShell + Win32 `SetWindowPos` to tile ALL Chrome windows (excluding ones with "JARVIS|localhost|7777" in title) into the left 62%. `reset_layout()` resets count.
+**Browser engine:** One persistent, visible Chrome driven by Playwright via `launch_persistent_context` with `channel="chrome"` and a dedicated profile at `~/.jarvis/chrome-profile`. Because it's one persistent profile, the **profile picker / "choose an account" screen never appears** — sign into Google once and it's remembered. The page/context is cached in module globals (`_pw`, `_ctx`, `_page`) and reused across the session; `_get_page()` relaunches if the user closed the window. `atexit` closes it on shutdown.
 
-**Theatrical typing:** `pyautogui.write(word, interval=0.07)` word-by-word with 0.16s gaps between words. Clicks into tile's address bar at `y=45` from window top.
+**Anti-bot:** `ignore_default_args=["--enable-automation"]` + `--disable-blink-features=AutomationControlled` strip the automation tells that otherwise trigger Google's "unusual traffic" wall. `_dismiss_google_consent()` clicks through the cookie/consent dialog.
+
+**Theatrical typing:** `locator.press_sequentially(query, delay=85)` types into the real Google search box one char at a time, on screen. `_read_results()` pulls the answer from `#search`/`#rso`/`#center_col`.
+
+**Legacy tile helpers** (`_arrange`, `_slots`, `_focus_slot_and_type`, `JARVIS_FRACTION`, etc.) remain at the bottom of the file but are used **only by `demo.py`**.
 
 ### Extras (`tools/extras.py`)
 | Tool | Description |
@@ -193,7 +207,7 @@ _NARRATIONS = {
     ...
 }
 ```
-`_patch_agent_for_dashboard()` monkey-patches `core.agent._execute_tool` to: emit WebSocket tool event → speak narration → call original.
+`main.py` passes `_on_tool_start` / `_on_tool_end` into `process_instruction()`. Before each tool: emit WebSocket tool event → speak narration → step aside if it opens a window. After browser tools: JARVIS reclaims the top. (This replaced the old `_patch_agent_for_dashboard` monkey-patch.)
 
 ### Wake Response (random)
 ```python
@@ -211,13 +225,37 @@ random.choice(["Online. How can I assist you, sir?", "JARVIS online. What do you
 
 ---
 
-## `core/agent.py` — Key Details
+## `core/agent.py` — Key Details (the Orchestrator)
 
 - `SYSTEM_PROMPT` — JARVIS persona (formal, "sir", dry wit, concise, always uses tools)
-- `TOOL_DEFINITIONS` — all 15 tools registered with the model
-- `_conversation` — in-memory list, session-scoped context window
-- `process_instruction()` — manual tool-calling loop (no framework), runs until no more `tool_calls`
-- `_execute_tool()` — routes tool name → function; monkey-patched by `main.py`
+- `TOOL_DEFINITIONS` — all 16 tools registered with the model
+- `_execute_tool(name, args)` — routes tool name → function (lazy imports)
+- `_get_orchestrator()` — builds/caches the single `Agent` ("jarvis") holding every tool via
+  `_execute_tool`; its `.history` IS the session-scoped memory (replaces the old `_conversation`)
+- `process_instruction(text, on_tool_start, on_tool_end)` — delegates to the orchestrator's
+  `run()`. Stage 2+ splits tools into specialist sub-agents (agents-as-tools)
+
+## `core/agent_base.py` — the Agent class (multi-agent foundation)
+
+- `Agent(name, system_prompt, tools, dispatch, model, client_getter)` — each has its own `history`
+- `run(text, on_tool_start, on_tool_end)` — the manual Groq tool-calling loop, lifted verbatim
+  from the old `process_instruction`; the two hooks fire around each tool. One class powers every
+  agent: a specialist is just an `Agent` with a narrower prompt + tool set, called by the
+  orchestrator through an `ask_<specialist>` dispatch entry.
+- `dispatch(name, args, on_tool_start, on_tool_end)` — a delegating tool (ask_researcher) threads
+  the hooks into its sub-agent's `run()`, so narration + HUD events stay alive one level down.
+
+## `core/agents/researcher.py` — first specialist (Stage 2, done)
+
+- The **Researcher** owns the 5 browser tools (`search_google`, `open_url`, `find_prices`,
+  `get_page_text`, `close_browser`) + a research-tuned prompt. `ask_researcher(task, hooks)` runs
+  its own tool loop and returns synthesized findings for JARVIS to speak.
+- The orchestrator no longer holds the browser tools — it has one `ask_researcher` tool whose
+  dispatch calls the Researcher. Hooks are threaded down so browser tools still narrate + drive
+  the HUD when the *Researcher* (not JARVIS) calls them.
+- `main.py` emits `server.emit("agent", name="researcher", state=active/idle)` around the
+  delegation, igniting the **agent rail** in the HUD (right-center: RESEARCHER active; OPERATOR /
+  VISION / SCHEDULER shown as offline placeholders for future specialists).
 
 ---
 
@@ -239,12 +277,15 @@ random.choice(["Online. How can I assist you, sir?", "JARVIS online. What do you
 |---|---|
 | Gemini API free tier = 0 in India | Using Groq + Llama 4 Scout instead |
 | pygame no Python 3.14 wheel | Using PyAV + sounddevice for audio |
-| Bot detection on price search | `find_prices` uses headed Playwright + Bing |
+| Google "unusual traffic" wall | Fixed — strip `--enable-automation` + disable `AutomationControlled` blink feature. Verified: live gold-price search reads real results. |
+| Account/profile chooser got stuck | Fixed — dedicated persistent Chrome profile means one profile, no picker ever. Sign into Google once. |
+| Actions happened off-screen | Fixed — backdrop model + visible Playwright window; `find_prices` no longer uses a 1×1 off-screen window |
+| Web results crash cp1252 console | Fixed — `main.py` reconfigures stdout/stderr to UTF-8 with `errors="replace"` |
 | Antigravity IDE recent projects | `get_recent_vs_code_project()` reads VS Code's storage.json — won't work for Antigravity. Fix pending. |
 | Weather wttr.in emoji encode error | Use text-only format codes `%l:+%C,+%t...` not `?format=3` |
 | State UI not changing before | CSS was too subtle (glow at 0.10 alpha). Fixed — now 0.55-0.75 alpha with background tint. |
 | WS events not confirmed live | Keyboard shortcuts (1-4) confirm CSS works. Real WS drive untested — check green dot in top-right. |
-| Chrome window tile click misses | `y=45` targets Chrome address bar from window top. Adjust if Chrome opens with different chrome height. |
+| Chrome window tile click misses | Legacy (`demo.py` only). Live assistant uses Playwright element targeting, not blind `y=45` clicks. |
 
 ---
 
@@ -254,8 +295,9 @@ random.choice(["Online. How can I assist you, sir?", "JARVIS online. What do you
 2. **Antigravity IDE support** — find where Antigravity stores recent projects and update `get_recent_vs_code_project()`
 3. **ElevenLabs voice upgrade** — swap `edge-tts` for a proper Jarvis-sounding voice
 4. **JARVIS center text color** — make the "JARVIS" canvas text change color to match the active state accent
-5. **`reset_layout()` command** — wire "reset layout" voice command to `browser.reset_layout()` so tile counter resets
+5. **First-run Google sign-in** — the dedicated profile starts logged out; plain search works, but sign into Google once in the JARVIS Chrome window for personalised results
 6. **Persistent memory** — JARVIS currently has no memory across sessions (conversation history resets on restart)
+7. **Live end-to-end run** — browser flow verified standalone; still want a full voice run (wake → "open chrome and search X" → watch it → spoken answer)
 
 ---
 

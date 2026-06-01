@@ -159,11 +159,8 @@ def take_screenshot(filename: str = "") -> str:
 
 
 def describe_screen(question: str = "What is on the screen right now?") -> str:
+    """Take a screenshot and use Llama 4 Scout's vision to answer a question about it."""
     time.sleep(1.5)  # let any just-opened app finish loading
-    """
-    Take a screenshot and use Llama 4 Scout's vision to answer a question about it.
-    Great for reading on-screen text, understanding what app is open, etc.
-    """
     import base64
     import io
     from PIL import ImageGrab
