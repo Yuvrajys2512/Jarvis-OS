@@ -9,7 +9,14 @@ from config.settings import TTS_VOICE, TTS_RATE, TTS_PITCH
 
 def speak(text: str) -> None:
     """Speak text aloud. Blocks until the audio finishes playing."""
-    asyncio.run(_speak_async(text))
+    try:
+        asyncio.get_running_loop()
+        # A loop is already running in this thread — run in a fresh thread
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            ex.submit(asyncio.run, _speak_async(text)).result()
+    except RuntimeError:
+        asyncio.run(_speak_async(text))
 
 
 async def speak_async(text: str) -> None:

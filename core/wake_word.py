@@ -3,66 +3,92 @@ import sounddevice as sd
 from faster_whisper import WhisperModel
 from config.settings import AUDIO_SAMPLE_RATE
 
-CHUNK_DURATION = 2.0  # seconds per chunk — longer gives Whisper more context
+# Step size: how much new audio we add per iteration.
+# Window: how much audio we send to Whisper each time.
+# The window slides forward by STEP each loop, so any word said at any point
+# in time is fully captured within one window cycle.
+STEP_DURATION = 0.5    # seconds of new audio recorded per loop
+WINDOW_DURATION = 2.0  # seconds transcribed each time
 
-# Whisper commonly mishears "Jarvis" — cover all phonetic variants
+# Every phonetic mishear of "Jarvis" that Whisper has ever produced.
+# Add anything new you spot in the terminal "[wake] heard:" lines.
 _TRIGGERS = {
     "jarvis", "jarvi", "jarvi's", "jarves", "jarvice", "jarvi s", "jarv",
-    "jarvs", "jarvas", "jarbis", "jarvis,", "jarbus", "jarvos", "harvey",
+    "jarvs", "jarvas", "jarbis", "jarvis,", "jarbus", "jarvos", "jarvius",
+    "jarvish", "jarview", "jarvisc", "jarby", "harvey", "harvey's",
+    "travis", "travis,", "ferris", "ferris,", "harris", "jervis",
+    "marvis", "garvis", "barvis", "carvis", "darvis",
+    "jar vis", "jar-vis", "j.a.r.v.i.s",
 }
 
-_tiny_model: WhisperModel | None = None
+_model: WhisperModel | None = None
 
 
 def _get_model() -> WhisperModel:
-    """
-    Reuse the 'base' Whisper model — already downloaded in Phase 3, no internet needed.
-    """
-    global _tiny_model
-    if _tiny_model is None:
+    global _model
+    if _model is None:
         print("Loading wake word model...")
-        _tiny_model = WhisperModel("base", device="cpu", compute_type="int8")
+        _model = WhisperModel("base", device="cpu", compute_type="int8")
         print("Wake word model ready.")
-    return _tiny_model
+    return _model
 
 
 def wait_for_wake_word() -> None:
     """
     Block until the user says 'Jarvis'.
 
-    How it works:
-    - Records a fixed 2-second audio chunk from the mic
-    - Transcribes it with the tiny Whisper model (~300ms on CPU)
-    - If the word 'jarvis' appears anywhere in the transcription → trigger
-    - Otherwise → discard and record the next chunk
-    Total worst-case latency: ~2.3 seconds from when you say 'Jarvis'
+    Uses a sliding window: records STEP_DURATION seconds of new audio each loop,
+    keeps a rolling WINDOW_DURATION buffer, and transcribes the full window.
+    This means 'Jarvis' said at any point is always fully within one window —
+    the old fixed-chunk approach split words at chunk boundaries and missed them.
+
+    initial_prompt biases Whisper's decoder toward 'Jarvis', making it far more
+    likely to transcribe it correctly even in non-native accents or noisy rooms.
     """
     model = _get_model()
-    chunk_samples = int(AUDIO_SAMPLE_RATE * CHUNK_DURATION)
+    step_samples = int(AUDIO_SAMPLE_RATE * STEP_DURATION)
+    window_samples = int(AUDIO_SAMPLE_RATE * WINDOW_DURATION)
+
+    # Rolling audio buffer — always holds the last WINDOW_DURATION seconds
+    buffer = np.zeros(window_samples, dtype="float32")
 
     print("Waiting for 'Jarvis'...")
+    _silent_ticks = 0
 
-    _silent_count = 0
     while True:
-        audio = sd.rec(chunk_samples, samplerate=AUDIO_SAMPLE_RATE, channels=1, dtype="float32")
+        # Record next step (blocks for STEP_DURATION seconds)
+        chunk = sd.rec(step_samples, samplerate=AUDIO_SAMPLE_RATE, channels=1, dtype="float32")
         sd.wait()
-        audio = audio.flatten()
+        chunk = chunk.flatten()
 
-        rms = float(np.sqrt(np.mean(audio ** 2)))
-        print(f"  [wake] RMS={rms:.4f}", end="\r")   # live level meter in terminal
-        if rms < 0.0001:   # near-digital-silence — skip; Whisper handles real quiet speech
-            _silent_count += 1
-            if _silent_count % 5 == 0:
-                print(f"  [wake] no signal (RMS={rms:.4f}) — check mic")
+        # Slide buffer: drop oldest step, append newest
+        buffer = np.roll(buffer, -step_samples)
+        buffer[-step_samples:] = chunk
+
+        # Skip transcription if the buffer is near-silent (saves CPU)
+        rms = float(np.sqrt(np.mean(buffer ** 2)))
+        if rms < 0.0003:
+            _silent_ticks += 1
+            if _silent_ticks % 10 == 0:
+                print(f"  [wake] no signal (RMS={rms:.5f}) — check mic", end="\r")
             continue
-        _silent_count = 0
+        _silent_ticks = 0
+        print(f"  [wake] RMS={rms:.4f}", end="\r")
 
-        # no_speech_threshold=0.1 — don't let Whisper silently discard quiet-but-real speech
-        segments, _ = model.transcribe(audio, language="en", beam_size=1, no_speech_threshold=0.1)
+        segments, _ = model.transcribe(
+            buffer,
+            language="en",
+            beam_size=5,                   # more search → more accurate than beam_size=1
+            best_of=5,
+            initial_prompt="Jarvis.",      # strongly biases decoder toward this word
+            condition_on_previous_text=False,
+            no_speech_threshold=0.6,       # standard threshold; don't discard borderline audio
+            temperature=0.0,               # deterministic — no random sampling
+        )
         text = " ".join(s.text for s in segments).lower().strip()
 
         if text:
-            print(f"  [wake] heard: {text!r}")   # shows in terminal so you can see what it's picking up
+            print(f"  [wake] heard: {text!r}")
 
         if any(trigger in text for trigger in _TRIGGERS):
             _play_activation_tone()
@@ -70,10 +96,7 @@ def wait_for_wake_word() -> None:
 
 
 def _play_activation_tone() -> None:
-    """
-    Two rising tones as instant confirmation that JARVIS heard the wake word.
-    Pure numpy — no audio files, no TTS delay.
-    """
+    """Two rising tones confirming JARVIS heard the wake word."""
     sample_rate = 22050
     duration = 0.12
 

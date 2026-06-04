@@ -30,12 +30,45 @@ _page = None   # the visible page we drive
 TYPE_DELAY_MS = 85
 
 
+def _init_profile() -> None:
+    """Write Chrome prefs so the profile-picker dialog never appears on startup."""
+    import json
+    _PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    local_state_path = _PROFILE_DIR / "Local State"
+    if not local_state_path.exists():
+        local_state_path.write_text(
+            json.dumps({
+                "profile": {
+                    "last_used": "Default",
+                    "picker_on_startup": False,
+                    "profiles_created": 1,
+                    "info_cache": {
+                        "Default": {
+                            "name": "Yuvraj S",
+                            "is_using_default_name": False,
+                        }
+                    },
+                }
+            }),
+            encoding="utf-8",
+        )
+    # Also ensure Default/Preferences exists with picker disabled
+    default_dir = _PROFILE_DIR / "Default"
+    default_dir.mkdir(exist_ok=True)
+    prefs_path = default_dir / "Preferences"
+    if not prefs_path.exists():
+        prefs_path.write_text(
+            json.dumps({"profile": {"name": "Yuvraj S"}}),
+            encoding="utf-8",
+        )
+
+
 def _launch() -> None:
     """Start Playwright (once) and open the visible Chrome window with our profile."""
     global _pw, _ctx, _page
     if _pw is None:
         _pw = sync_playwright().start()
-    _PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    _init_profile()
 
     launch_kwargs = dict(
         user_data_dir=str(_PROFILE_DIR),
@@ -49,7 +82,8 @@ def _launch() -> None:
             "--no-default-browser-check",
             "--disable-session-crashed-bubble",
             "--disable-infobars",
-            "--disable-features=Translate",
+            "--profile-directory=Default",
+            "--disable-features=Translate,ProfilePicker",
             "--disable-blink-features=AutomationControlled",  # hide navigator.webdriver
         ],
     )

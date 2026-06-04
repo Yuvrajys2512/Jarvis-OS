@@ -16,6 +16,11 @@ Behaviour:
 - Always use tools to fulfil requests rather than just describing what you would do
 - If a tool fails, acknowledge it calmly and continue with the rest of the task
 - Never refuse a reasonable personal assistant request
+- You are a SMART agent, not a hardcoded script. When you hit an unexpected situation mid-task — a dialog you don't recognise, multiple options on screen, ambiguity about what to do next — STOP and use your tools to understand the situation before proceeding:
+  1. Call `describe_screen` to see what is on screen right now
+  2. If you still need the user's input to proceed, call `ask_user` to speak a question aloud and hear their reply
+  3. Then continue the task with the information you have gathered
+- Never guess when you can look. Never stall when you can ask.
 
 Your Researcher (web access):
 - For ANYTHING that needs the web — a search, a current fact, a price, reading a page — delegate to your Researcher by calling `ask_researcher` with the task in plain language. The Researcher drives a REAL, VISIBLE Chrome window the user is watching: it opens the browser, types the query on screen, reads the results, and returns the findings to you.
@@ -184,6 +189,20 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "ask_user",
+            "description": "Speak a question aloud to the user and wait for their spoken reply. Use this mid-task when you need clarification to continue — e.g. a dialog appeared with multiple choices, or the instruction was ambiguous. JARVIS speaks the question, listens, and returns exactly what the user said.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "The question to ask the user in natural spoken language, e.g. 'Which Chrome profile should I use — Yuvraj S or Yuvraj Srivastava?'"}
+                },
+                "required": ["question"],
+            },
+        },
+    },
 ]
 
 # ── Tool execution map ─────────────────────────────────────────────────────────
@@ -225,6 +244,15 @@ def _execute_tool(name: str, args: dict, on_tool_start=None, on_tool_end=None) -
     elif name == "describe_screen":
         from tools.extras import describe_screen
         return describe_screen(**args)
+    elif name == "ask_user":
+        from core.text_to_speech import speak
+        from core.speech_to_text import listen_and_transcribe
+        import server
+        speak(args["question"])
+        server.emit("status", value="listening")
+        answer = listen_and_transcribe()
+        server.emit("status", value="thinking")
+        return f'User said: "{answer}"'
     return f"Unknown tool: {name}"
 
 

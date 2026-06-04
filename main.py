@@ -155,6 +155,7 @@ _NARRATIONS = {
     "write_clipboard":    lambda a: "Copying that to your clipboard.",
     "take_screenshot":    lambda a: "Taking a screenshot.",
     "describe_screen":    lambda a: "Let me take a look at your screen.",
+    "ask_user":           lambda a: None,  # question is spoken inside the tool itself
     "run_terminal_command": lambda a: "Running that command.",
 }
 
